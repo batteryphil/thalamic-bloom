@@ -1,0 +1,8 @@
+*.pth
+*.jsonl
+__pycache__/
+*.pyc
+dashboard/metrics*.jsonl
+dashboard/hardware.json
+*.egg-info/
+.env
