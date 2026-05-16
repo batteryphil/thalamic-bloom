@@ -175,7 +175,18 @@ class Mamba3MIMORLF(nn.Module):
         self.norm_f = nn.LayerNorm(d_model)
         self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
         self.lm_head.weight = self.embedding.weight  # Weight tying
-        self.last_telemetry = {}
+        
+        # Phase 3j: Per-arm competitive vector router
+        self.domain_router = nn.Linear(self.d_model, self.mimo_paths, bias=True)
+        nn.init.normal_(self.domain_router.weight, mean=0.0, std=0.01)
+        nn.init.zeros_(self.domain_router.bias)
+        
+        self.last_telemetry = {
+            'arm_collapse_metric': 0.0,
+            'latent_energy': 0.0,
+            'gate_score': 0.0,
+            'primer_delta': 0.0
+        }
         
         # Zero-Init Thalamic Primer for Identity Pass-through
         nn.init.zeros_(self.thalamic_primer.ssm.out_proj.weight)
@@ -212,15 +223,15 @@ class Mamba3MIMORLF(nn.Module):
         # A. The Thalamic Primer: Temporal Sequence Mixing before routing
         primer_out = self.thalamic_primer(orig_embs)
         
-        # Calculate Primer Activation Magnitude as routing signal.
-        # This measures HOW MUCH the Primer is transforming the representations.
-        # Starts near 0.0 (zero-init), grows naturally as weights develop.
-        # This directly breaks the SSM glass ceiling that locked entropy at 0.0000.
+        # --- SCALE-INVARIANT ANGULAR DEFORMATION ROUTER ---
+        # Measure angular deviation instead of L2 distance to prevent saturation
         with torch.no_grad():
-            primer_delta = (primer_out - orig_embs).norm(dim=-1).mean()
-            # Scale: delta of ~0.1 opens gate to 50%, delta of ~0.2 opens fully.
-            # Use detached signal so routing heuristic stays outside autograd.
-            routing_signal = primer_delta.detach()
+            primer_cos_sim = F.cosine_similarity(orig_embs, primer_out, dim=-1)
+            # Invert so 0.0 = identity (no deviation), bounding max deviation up to 2.0
+            primer_delta = (1.0 - primer_cos_sim).mean().detach()
+
+        # Scale the geometric deviation (tune multiplier to 20.0 to account for smaller cosine values)
+        routing_signal = primer_delta
         
         # Blend: add Primer signal into main stream
         x = orig_embs + primer_out * 0.1
@@ -228,11 +239,14 @@ class Mamba3MIMORLF(nn.Module):
         # Route into Auxiliary Loop Engine via Dynamic Bridge
         bridge_out = self.bridge(x)
         
-        # Soft-Body Compute Allocation driven by Primer Activation Magnitude
-        raw_gate_score = torch.sigmoid(routing_signal * 10.0 - 1.0)
-        # --- OCTOPODA TRICKLE-CHARGE PATCH ---
-        # Clamp the minimum routing weight to 0.05 (5%) to prevent Synaptic Atrophy
-        gate_score = torch.clamp(raw_gate_score, min=0.05).unsqueeze(-1).unsqueeze(-1)
+        # Phase 3j: Temporal Vector Gating
+        # Generate 4 distinct routing logits per token from the Primer output.
+        with torch.no_grad():
+            route_logits = self.domain_router(primer_out.detach())  # (B, L, 4)
+
+        competitive_weights = F.softmax(route_logits, dim=-1)
+        route_weights = torch.clamp(competitive_weights, min=0.05)
+        route_weights = route_weights / route_weights.sum(dim=-1, keepdim=True)
         
         parallel_states = []
         autotomic_gates_list = []
@@ -246,9 +260,43 @@ class Mamba3MIMORLF(nn.Module):
             autotomic_gate = torch.clamp(torch.sigmoid((10.0 - variance) * 0.5), min=0.05)
             autotomic_gates_list.append(autotomic_gate.item() if isinstance(autotomic_gate, torch.Tensor) else autotomic_gate)
             
-            mask = 1.0 if i == 0 else gate_score
-            parallel_states.append(state * mask * autotomic_gate)
+            # Apply per-token vector weight for this arm (B, L, 1) for broadcasting
+            arm_weight = route_weights[..., i:i+1]  # (B, L, 1)
+
+            # Arm 0 always gets full gradient (primary cortex, preserved)
+            if i == 0:
+                parallel_states.append(state * autotomic_gate)
+            else:
+                parallel_states.append(state * arm_weight * autotomic_gate)
             
+        mean_gate = route_weights[..., 1:].mean().item()
+        
+        # =====================================================================
+        # DYNAMICAL SYSTEMS TELEMETRY PROBES (No Gradient Tracking)
+        # =====================================================================
+        # Sample ~5% of batches to save compute and keep TPS high
+        if not self.training or (self.training and torch.rand(1).item() < 0.05):
+            with torch.no_grad():
+                # 1. LATENT COSINE SEPARATION (Arm Divergence)
+                # 1.0 = Mode Collapse (Redundant). 0.0 = Orthogonal Specialization.
+                arm_0, arm_1, arm_2, arm_3 = parallel_states
+                
+                sim_01 = F.cosine_similarity(arm_0, arm_1, dim=-1).mean()
+                sim_02 = F.cosine_similarity(arm_0, arm_2, dim=-1).mean()
+                sim_03 = F.cosine_similarity(arm_0, arm_3, dim=-1).mean()
+                
+                avg_collapse_metric = (sim_01 + sim_02 + sim_03) / 3.0
+                
+                # 2. RECURRENT ATTRACTOR STABILITY (Latent Energy)
+                latent_energy = torch.stack(parallel_states).norm(dim=-1).mean()
+                
+                self.last_telemetry.update({
+                    'arm_collapse_metric': avg_collapse_metric.item(),
+                    'latent_energy': latent_energy.item(),
+                    'primer_delta': primer_delta.item() if isinstance(primer_delta, torch.Tensor) else primer_delta
+                })
+        # =====================================================================
+        
         # Latent IPC Cross-Talk
         ipc_in = torch.cat(parallel_states, dim=-1)
         ipc_out = self.ipc_mixer(ipc_in)
@@ -256,11 +304,12 @@ class Mamba3MIMORLF(nn.Module):
         # Split back to individual paths
         final_states = torch.split(ipc_out, self.d_model, dim=-1)
         
-        self.last_telemetry = {
+        self.last_telemetry.update({
             "entropy": routing_signal.item() if isinstance(routing_signal, torch.Tensor) else routing_signal,
-            "gate_score": gate_score.mean().item() if isinstance(gate_score, torch.Tensor) else gate_score,
-            "autotomic_gates": autotomic_gates_list
-        }
+            "gate_score": mean_gate,
+            "autotomic_gates": autotomic_gates_list,
+            "route_weights": route_weights.mean(dim=(0, 1)).tolist()  # Per-arm mean
+        })
             
         # Collapse multiple latent paths back into the residual stream
         x = x + (sum(final_states) / self.mimo_paths)

@@ -83,7 +83,7 @@ class SFTStreamDataset(IterableDataset):
 
     def _get_cocktail_sample(self) -> Tuple[str, str]:
         """Pull and format a math/logic sample from the local Cocktail."""
-        domain = random.choice(["gsm", "arc", "premium"])
+        domain = random.choices(["gsm", "arc", "premium"], weights=[0.25, 0.25, 0.50])[0]
         try:
             if domain == "gsm":
                 try:
@@ -123,8 +123,8 @@ class SFTStreamDataset(IterableDataset):
         return user_text, a_text
 
     def _get_next_sample(self) -> Tuple[str, str]:
-        """70% Hermes, 30% Cocktail for balanced multi-domain arm specialization."""
-        if random.random() < 0.70:
+        """90% Hermes, 10% Cocktail for balanced multi-domain arm specialization."""
+        if random.random() < 0.90:
             return self._get_hermes_sample()
         return self._get_cocktail_sample()
 

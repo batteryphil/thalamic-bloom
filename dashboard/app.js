@@ -123,6 +123,35 @@ async function fetchMetrics() {
                     document.getElementById('val-salad').innerText = '> ' + data.salad;
                 }
 
+                // Parse the new payload keys (handling varying JSON key names and falling back to 0.0)
+                const collapseVal = data.collapse_metric || data.arm_collapse_metric || 0.0;
+                const energyVal = data.energy_metric || data.latent_energy || 0.0;
+
+                // 1. Update Latent Energy
+                if (energyVal > 0) {
+                    document.getElementById('latent-energy-val').innerText = energyVal.toFixed(2);
+                }
+
+                // 2. Update Arm Collapse with Visual Diagnostics
+                if (collapseVal > 0) {
+                    const collapseEl = document.getElementById('collapse-metric-val');
+                    const statusEl = document.getElementById('collapse-status');
+                    
+                    collapseEl.innerText = collapseVal.toFixed(4);
+
+                    // --- DYNAMICAL SYSTEMS COLOR CODING ---
+                    if (collapseVal > 0.85) {
+                        collapseEl.style.color = '#ff4444'; // RED: Danger (Mode Collapse / Clones)
+                        statusEl.innerText = "Status: Monolithic (Redundant)";
+                    } else if (collapseVal > 0.60) {
+                        collapseEl.style.color = '#ffbb33'; // YELLOW: Healthy Divergence
+                        statusEl.innerText = "Status: Splitting (Diverging)";
+                    } else {
+                        collapseEl.style.color = '#00C851'; // GREEN: Perfect Orthogonality
+                        statusEl.innerText = "Status: Specialized MoE";
+                    }
+                }
+
                 if (!seenSteps.has(data.step)) {
                     seenSteps.add(data.step);
                     steps.push(data.step);

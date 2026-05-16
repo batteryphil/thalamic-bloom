@@ -6,7 +6,7 @@ from mamba3_mimo_builder import Mamba3MIMORLF
 def run_benchmark():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("==================================================================")
-    print("Loading Mamba 3 MIMO Telemetry Benchmark...")
+    print("Loading Mamba 3 MIMO OS Telemetry Benchmark...")
     print("==================================================================")
     
     tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")

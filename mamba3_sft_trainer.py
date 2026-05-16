@@ -9,47 +9,43 @@ from transformers import AutoTokenizer
 
 def train() -> None:
     """
-    Execute Phase 3 (Jarvis v4) True Cognitive Routing Training.
+    Execute Phase 2 Supervised Fine-Tuning (SFT) with Loss Masking.
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Initializing Jarvis v4 (Phase 3) on: {device}")
+    print(f"Initializing Mamba 3 MIMO SFT on: {device}")
     
     model = Mamba3MIMORLF(vocab_size=50304, d_model=768, n_layers=24)
     model.to(device)
     
-    checkpoint_path = "jarvis_v4.pth"
-    base_checkpoint_path = "jarvis_v3_sft.pth"
+    checkpoint_path = "jarvis_v3_sft.pth"
+    base_checkpoint_path = "jarvis_v3.pth"
     
     step = 0
-    # Check for existing Phase 3 checkpoint first
+    # Check for existing SFT checkpoint first
     if os.path.exists(checkpoint_path):
-        print(f"Found Phase 3 checkpoint at {checkpoint_path}. Resuming...")
+        print(f"Found SFT checkpoint at {checkpoint_path}. Resuming...")
         checkpoint = torch.load(checkpoint_path, map_location=device)
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            # SFT optimizer state is safe to load
+            optimizer_state = checkpoint['optimizer_state_dict']
             step = checkpoint['step']
             optimizer = AdamW(model.parameters(), lr=5e-5, weight_decay=0.01)
-            try:
-                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                print(f"Resumed from Phase 3 step {step}.")
-            except ValueError:
-                print(f"Resumed from Phase 3 step {step}. Optimizer wiped due to param mismatch (Phase 3j).")
+            optimizer.load_state_dict(optimizer_state)
+            print(f"Resumed from SFT step {step}.")
         else:
-            model.load_state_dict(checkpoint, strict=False)
+            model.load_state_dict(checkpoint)
             optimizer = AdamW(model.parameters(), lr=5e-5, weight_decay=0.01)
     elif os.path.exists(base_checkpoint_path):
-        print(f"Loading Phase 2 Baseline from {base_checkpoint_path}...")
+        print(f"Loading Base Pre-Trained checkpoint from {base_checkpoint_path}...")
         checkpoint = torch.load(base_checkpoint_path, map_location=device)
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            # We must load with strict=False because we added self.thalamic_primer
-            # which does not exist in the Phase 2 weights!
-            missing_keys, unexpected_keys = model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-            print(f"Missing keys (expected for new Thalamic Primer): {missing_keys}")
+            model.load_state_dict(checkpoint['model_state_dict'])
         else:
-            model.load_state_dict(checkpoint, strict=False)
-        # RESET OPTIMIZER: We explicitly wipe Phase 2 momentum for the new Phase 3 routing!
+            model.load_state_dict(checkpoint)
+        # RESET OPTIMIZER: We intentionally do not load the Phase 1 optimizer state!
         optimizer = AdamW(model.parameters(), lr=5e-5, weight_decay=0.01)
-        print("Model loaded. Optimizer state mathematically WIPED for Phase 3.")
+        print("Model loaded. Optimizer state reset for Phase 2 SFT.")
     else:
         print("No checkpoints found. Starting from scratch!")
         optimizer = AdamW(model.parameters(), lr=5e-5, weight_decay=0.01)
@@ -57,7 +53,9 @@ def train() -> None:
     print("Applying Orthogonal Weights (Decentralized Ganglionic Processing)...")
     model.initialize_asymmetric_arms()
     
+    # Use the new SFT dataloader
     dataloader = get_sft_dataloader(batch_size=4, seq_len=1024)
+    # CRITICAL: ignore_index=-100 ensures we don't backprop on the user prompts
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
     
     scaler = torch.amp.GradScaler('cuda')
@@ -67,7 +65,7 @@ def train() -> None:
     dummy_input = torch.tensor([tokenizer.encode("User: Hello!\nAssistant: ")]).to(device)
             
     model.train()
-    print("Starting Phase 3 (Jarvis v4) Loop...")
+    print("Starting SFT loop...")
     
     start_time = time.time()
     tokens_per_step = 4 * 1024
@@ -110,6 +108,7 @@ def train() -> None:
                 else:
                     smoothed_loss = (1 - alpha) * smoothed_loss + alpha * actual_loss
                 
+                # SFT Scheduler Bounds (Lower than pre-training)
                 if smoothed_loss >= 5.0:
                     target_lr = 5e-5
                 elif smoothed_loss <= 1.5:
@@ -125,7 +124,7 @@ def train() -> None:
                         
         except RuntimeError as e:
             if "out of memory" in str(e).lower():
-                print("OOM Caught! Skipping batch...")
+                print("WARNING: CUDA OOM caught. Emptying cache...")
                 if hasattr(torch.cuda, 'empty_cache'):
                     torch.cuda.empty_cache()
                 optimizer.zero_grad()
@@ -140,7 +139,7 @@ def train() -> None:
             elapsed = time.time() - start_time
             tps = (50 * tokens_per_step) / elapsed if elapsed > 0 else 0
             loss_val = loss.item() * accumulation_steps
-            print(f"Phase3 Step {step:04d} | Loss: {loss_val:.4f} (Smoothed: {smoothed_loss:.4f}) | LR: {current_lr:.7f} | TPS: {tps:.2f} | Time/50: {elapsed:.2f}s")
+            print(f"SFT Step {step:04d} | Loss: {loss_val:.4f} (Smoothed: {smoothed_loss:.4f}) | LR: {current_lr:.7f} | TPS: {tps:.2f} | Time/50: {elapsed:.2f}s")
             
             salad = None
             if step % 1000 == 0 and step > 0:
@@ -156,22 +155,7 @@ def train() -> None:
             os.makedirs("dashboard", exist_ok=True)
             with open("dashboard/metrics.jsonl", "a") as f:
                 import json
-                
-                # Fetch live telemetry from the biological routing logic
-                telemetry = model.last_telemetry if hasattr(model, 'last_telemetry') else {}
-                if step % 50 == 0:
-                    print(f"DEBUG TELEMETRY: {telemetry}")
-                
-                gate = telemetry.get('gate_score', 0)
-                entropy = telemetry.get('entropy', 0)
-                collapse_metric = telemetry.get('arm_collapse_metric', 0.0)
-                energy_metric = telemetry.get('latent_energy', 0.0)
-                
-                payload = {
-                    "step": step, "loss": loss_val, "tps": tps, "elapsed": elapsed, 
-                    "lr": current_lr, "gate_score": gate, "entropy": entropy,
-                    "collapse_metric": collapse_metric, "latent_energy": energy_metric
-                }
+                payload = {"step": step, "loss": loss_val, "tps": tps, "elapsed": elapsed, "lr": current_lr}
                 if salad:
                     payload["salad"] = salad
                 f.write(json.dumps(payload) + "\n")

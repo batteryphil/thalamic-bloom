@@ -1,8 +1,15 @@
+# Checkpoints
 *.pth
-*.jsonl
+
+# Caches and outputs
 __pycache__/
-*.pyc
-dashboard/metrics*.jsonl
-dashboard/hardware.json
-*.egg-info/
+trainer.log
+benchmark_*.txt
+telemetry_results*.txt
+
+# Virtual environments
 .env
+venv/
+dashboard/hardware.json
+dashboard/*.log
+dashboard/*.jsonl
