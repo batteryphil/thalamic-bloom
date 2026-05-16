@@ -199,6 +199,10 @@ class Mamba3MIMORLF(nn.Module):
         for name, param in self.mimo_reasoning_blocks.named_parameters():
             if 'weight' in name and param.dim() >= 2:
                 nn.init.orthogonal_(param)
+            elif param.dim() == 1:
+                # Break temporal symmetry in A_log, D, dt_bias, etc.
+                with torch.no_grad():
+                    param.add_(torch.randn_like(param) * 0.05)
         
     def forward(self, input_ids: torch.Tensor, loop_idx: int = 0) -> torch.Tensor:
         """
@@ -240,12 +244,23 @@ class Mamba3MIMORLF(nn.Module):
         bridge_out = self.bridge(x)
         
         # Phase 3j: Temporal Vector Gating
-        # Generate 4 distinct routing logits per token from the Primer output.
-        with torch.no_grad():
-            route_logits = self.domain_router(primer_out.detach())  # (B, L, 4)
+        # The domain_router MUST be part of the autograd graph to learn specializations.
+        # We only detach primer_out to protect the upstream backbone.
+        route_logits = self.domain_router(primer_out.detach())  # (B, L, 4)
 
         competitive_weights = F.softmax(route_logits, dim=-1)
-        route_weights = torch.clamp(competitive_weights, min=0.05)
+        
+        # 1. Find the winning arm for each token
+        top_indices = competitive_weights.argmax(dim=-1, keepdim=True)
+        
+        # 2. Create a Hard Binary Mask (1 for winner, 0 for losers)
+        mask = torch.zeros_like(competitive_weights).scatter_(-1, top_indices, 1.0)
+        
+        # 3. Straight-Through Estimator: Forward = Hard Mask, Backward = Softmax
+        hard_weights = mask - competitive_weights.detach() + competitive_weights
+        
+        # 4. Trickle charge maintains 0.05 minimum for dormant arms
+        route_weights = torch.clamp(hard_weights, min=0.05)
         route_weights = route_weights / route_weights.sum(dim=-1, keepdim=True)
         
         parallel_states = []
@@ -270,6 +285,15 @@ class Mamba3MIMORLF(nn.Module):
                 parallel_states.append(state * arm_weight * autotomic_gate)
             
         mean_gate = route_weights[..., 1:].mean().item()
+        
+        # Calculate Orthogonal Regularization Loss (Repulsive Magnets)
+        if self.training:
+            sim_01 = F.cosine_similarity(parallel_states[0], parallel_states[1], dim=-1).mean()
+            sim_02 = F.cosine_similarity(parallel_states[0], parallel_states[2], dim=-1).mean()
+            sim_03 = F.cosine_similarity(parallel_states[0], parallel_states[3], dim=-1).mean()
+            self.ortho_loss = (sim_01 + sim_02 + sim_03) / 3.0
+        else:
+            self.ortho_loss = 0.0
         
         # =====================================================================
         # DYNAMICAL SYSTEMS TELEMETRY PROBES (No Gradient Tracking)

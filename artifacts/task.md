@@ -1,0 +1,10 @@
+- `[x]` Initialize Phase 4 Scripts
+  - `[x]` Copy `jarvis_v4_trainer.py` to `jarvis_phase4_trainer.py`
+  - `[x]` Implement targeted parameter freezing logic (Freeze backbone & MIMO arms)
+  - `[x]` Adjust telemetry/auto-stop logging for language convergence
+- `[/]` Execution
+  - `[/]` Run `jarvis_phase4_trainer.py` on the 70/30 dataset stream
+  - `[ ]` Monitor loss drops
+- `[ ]` Verification
+  - `[ ]` Re-run `oo_benchmark.py` to confirm Word Salad is resolved and grammatical structure is restored
+  - `[ ]` Create final walkthrough for Phase 4

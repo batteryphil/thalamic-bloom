@@ -1,0 +1,64 @@
+==================================================================
+Loading Mamba 3 MIMO OS Telemetry Benchmark...
+==================================================================
+Loaded checkpoint: jarvis_v4.pth
+PROMPT: User: Say hello.
+
+OUTPUT: 'To create a C#-Dur idea for an online web server using the ` transform` method, you can follow these steps:
+
+1'
+
+[TELEMETRY LOGS]
+Sequence Entropy:  0.5202
+Gate Score:        0.2765 (Activating 1.83 parallel paths)
+Autotomic Pruning: [0.9932, 0.9932, 0.9932, 0.9932]
+-----------------------------------------------------------------
+
+PROMPT: User: Write a Python script to calculate the Fibonacci sequence.
+
+OUTPUT: 'def fibonacci_memoization(n):
+    if n <= 0:
+        return []
+
+    # Initialize DP table and trace'
+
+[TELEMETRY LOGS]
+Sequence Entropy:  0.4994
+Gate Score:        0.3016 (Activating 1.90 parallel paths)
+Autotomic Pruning: [0.9932, 0.9932, 0.9932, 0.9932]
+-----------------------------------------------------------------
+
+PROMPT: User: A is True. B is False. C is A AND B. What is C? Think step by step.
+
+OUTPUT: 'Let's reason through this problem using the concept of tension for two sets A and B, which are both techniques to find out how many different combinations can'
+
+[TELEMETRY LOGS]
+Sequence Entropy:  0.5331
+Gate Score:        0.2815 (Activating 1.84 parallel paths)
+Autotomic Pruning: [0.9932, 0.9932, 0.9932, 0.9932]
+-----------------------------------------------------------------
+
+PROMPT: User: x = 10. y = 5. x, y = y, x. What is x?
+
+OUTPUT: 'To find the maximum value of each variable x^2, we need to apply the given function and then evaluate it at a constant speed. Let's'
+
+[TELEMETRY LOGS]
+Sequence Entropy:  0.6012
+Gate Score:        0.2451 (Activating 1.74 parallel paths)
+Autotomic Pruning: [0.9932, 0.9932, 0.9932, 0.9932]
+-----------------------------------------------------------------
+
+PROMPT: User: Output a JSON block with three random colors, and nothing else.
+
+OUTPUT: '```bash
+#!/bin/bash
+
+# Check if the correct number of arguments are provided
+if [ "$count" -ne 1 ];'
+
+[TELEMETRY LOGS]
+Sequence Entropy:  0.5395
+Gate Score:        0.2739 (Activating 1.82 parallel paths)
+Autotomic Pruning: [0.9932, 0.9932, 0.9932, 0.9932]
+-----------------------------------------------------------------
+

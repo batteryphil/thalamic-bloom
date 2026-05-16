@@ -55,9 +55,11 @@ def train() -> None:
         print("No checkpoints found. Starting from scratch!")
         optimizer = AdamW(model.parameters(), lr=5e-5, weight_decay=0.01)
         
-    print("Applying Orthogonal Weights (Decentralized Ganglionic Processing)...")
-    model.initialize_asymmetric_arms()
-    
+    print("Freezing Cognitive Backbone and MIMO Arms for Phase 4 IPC Calibration...")
+    for name, param in model.named_parameters():
+        param.requires_grad = False
+        if "ipc_mixer" in name or "domain_router" in name or "thalamic_primer" in name or "bridge" in name:
+            param.requires_grad = True
     dataloader = get_sft_dataloader(batch_size=4, seq_len=1024)
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
     
@@ -89,10 +91,6 @@ def train() -> None:
                 logits = model(x, loop_idx=0) 
                 loss = criterion(logits.view(-1, model.vocab_size), y.view(-1))
                 
-                # Phase 3j: Apply Repulsive Orthogonality Penalty
-                if hasattr(model, 'ortho_loss') and model.ortho_loss is not None:
-                    loss = loss + (2.0 * model.ortho_loss)
-                    
                 loss = loss / accumulation_steps
                 
             if torch.isnan(loss):
@@ -182,11 +180,11 @@ def train() -> None:
                     payload["salad"] = salad
                 f.write(json.dumps(payload) + "\n")
                 
-            # --- AUTO-STOP LOGIC (Phase 3j Target) ---
-            if collapse_metric < 0.60 and smoothed_loss < 2.0:
-                print(f"\n*** PHASE 3j TARGET REACHED ***")
-                print(f"Collapse Metric: {collapse_metric:.4f} | Smoothed Loss: {smoothed_loss:.4f}")
-                print("MIMO Arms have successfully specialized. Halting training.")
+            # --- AUTO-STOP LOGIC (Phase 4 Target) ---
+            if smoothed_loss < 1.0:
+                print(f"\n*** PHASE 4 TARGET REACHED ***")
+                print(f"Smoothed Loss: {smoothed_loss:.4f}")
+                print("IPC Mixer has successfully synthesized language. Halting training.")
                 
                 # Save final checkpoint
                 torch.save({
@@ -195,7 +193,7 @@ def train() -> None:
                     'optimizer_state_dict': optimizer.state_dict(),
                     'loss': loss.item(),
                 }, checkpoint_path)
-                print(f"Phase 3j Checkpoint saved to {checkpoint_path}")
+                print(f"Phase 4 Checkpoint saved to {checkpoint_path}")
                 
                 # Run automated benchmark
                 print("\nRunning Automated Benchmark (oo_benchmark.py)...")
