@@ -13,11 +13,11 @@ def test_benchmark():
     model.to(device)
     
     try:
-        checkpoint = torch.load("jarvis_v4.pth", map_location=device, weights_only=True)
+        checkpoint = torch.load("/hdd_data/mamba_checkpoints/jarvis_v4.pth", map_location=device, weights_only=True)
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
+            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
         else:
-            model.load_state_dict(checkpoint)
+            model.load_state_dict(checkpoint, strict=False)
         print("Loaded checkpoint: jarvis_v4.pth")
     except Exception as e:
         print(f"Error loading checkpoint: {e}")

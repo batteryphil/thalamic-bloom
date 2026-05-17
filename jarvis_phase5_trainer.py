@@ -45,11 +45,13 @@ def train() -> None:
     else:
         print("No checkpoints found. Starting from scratch!")
         
-    print("Freezing Cognitive Backbone and MIMO Arms for Phase 4 IPC Calibration...")
+    print("Freezing MIMO Arms for Phase 5 Cognitive Engram Injection...")
     for name, param in model.named_parameters():
-        param.requires_grad = False
-        if "ipc_mixer" in name or "domain_router" in name or "thalamic_primer" in name or "bridge" in name:
-            param.requires_grad = True
+        # Unfreeze EVERYTHING by default
+        param.requires_grad = True
+        # Freeze ONLY the MIMO specific structures to protect reasoning orthogonality
+        if "mimo_reasoning_blocks" in name:
+            param.requires_grad = False
             
     # CRITICAL FIX: Only pass parameters with requires_grad=True to the optimizer.
     # Otherwise, AdamW's weight_decay will corrupt the frozen parameters!
@@ -174,11 +176,10 @@ def train() -> None:
                     payload["salad"] = salad
                 f.write(json.dumps(payload) + "\n")
                 
-            # --- AUTO-STOP LOGIC (Phase 4 Target) ---
-            if smoothed_loss < 1.0:
-                print(f"\n*** PHASE 4 TARGET REACHED ***")
-                print(f"Smoothed Loss: {smoothed_loss:.4f}")
-                print("IPC Mixer has successfully synthesized language. Halting training.")
+            # --- AUTO-STOP LOGIC (Phase 5 Target) ---
+            if step >= 50000:
+                print(f"\n*** PHASE 5 TARGET REACHED ***")
+                print("Cognitive Engrams Injected. Halting training.")
                 
                 # Save final checkpoint
                 torch.save({

@@ -13,7 +13,7 @@ def run_benchmark():
     model = Mamba3MIMORLF(vocab_size=50304, d_model=768, n_layers=24)
     model.to(device)
     
-    checkpoint_path = "jarvis_v4.pth"
+    checkpoint_path = "/hdd_data/mamba_checkpoints/jarvis_v4.pth"
     try:
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:

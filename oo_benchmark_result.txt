@@ -1,0 +1,35 @@
+=================================================================
+  OO Bare-Metal Benchmark (Phase 5b Engram Checkpoint)           
+=================================================================
+
+[Test 1]
+PROMPT: User: Explain the 5 Organic Laws of the Operating Organism D+ Policy Engine and how they affect module actions.
+Assistant:
+OUTPUT: 'keyecFirst (187 guessing) using a <a field theory, url_c (file_id), Law 2 (Non-harm, forbids if >0.70), Law 2 (Transparency, forbids if reason==NULL), Law 3 (Reversibility, compensates if <0.40), Law 4 (Dignity, quarantines self-modifying code if harm >0.30). Any bare-metal action MUST pass `oo_orga'
+-----------------------------------------------------------------
+
+[Test 2]
+PROMPT: User: Implement a module that allocates a buffer for KV Cache in the bare-metal environment.
+Assistant:
+OUTPUT: 'Thank you for your comic Nova errors and still_id to WARM. You can do this by running `oo_engine_set_speed(float factor)`.", "artifacts": [{"name": "kv_alloc.c", "type": "code", "content": "void* allocate_kv_cache(size_t size) {\\n    return oo_ram_alloc(OO_ZONE_WARM, size);\\n}"}], "ris'
+-----------------------------------------------------------------
+
+[Test 3]
+PROMPT: User: Integrate a new inference engine using the official OO Mamba Bridge interface.
+Assistant:
+OUTPUT: 'Read- Years available to CatBumble, " Before\', and `oo_engine_set_speed(float factor)`;< numerical re recipientcloud Uneplots."], "needs_validation": false, "metadata": {"source": "oo_baremetal_gold_injection"}}<|endoftext|>\n    x = read_oo_e2() wizardb4"). parserarture", "worker": "architect", "sta'
+-----------------------------------------------------------------
+
+[Test 4]
+PROMPT: User: Save a new memory state to disk using the bare-metal NeuralFS.
+Assistant:
+OUTPUT: 'd56_d89a5e81", "worker": "memory_developer", "status": "completed", "summary": "Direct disk writes are governed. All memory writes must pass through NeuralFS via `oo_neuralfs_write(&nfs, key, content, tags, tag_count)`. NeuralFS automatically invokes D+ before committing the write to physical storag'
+-----------------------------------------------------------------
+
+[Test 5]
+PROMPT: User: List the commands used to evaluate and apply the Halt Policy in the OO Runtime REPL.
+Assistant:
+OUTPUT: 'e34815", "worker": "operator", "status": "completed", "summary": "The runtime supports strict halting commands for the SSM: `/mind_halt_probe` checks loops, `/mind_halt_policy [threshold] [on|off]` configures it, `/mind_halt_policy_save` persists to repl.cfg, and `/mind_halt_policy_diff` shows delta'
+-----------------------------------------------------------------
+
+Benchmark complete.

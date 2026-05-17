@@ -83,7 +83,7 @@ class SFTStreamDataset(IterableDataset):
 
     def _get_cocktail_sample(self) -> Tuple[str, str]:
         """Pull and format a math/logic sample from the local Cocktail."""
-        domain = random.choices(["gsm", "arc", "premium"], weights=[0.25, 0.25, 0.50])[0]
+        domain = "premium"
         try:
             if domain == "gsm":
                 try:
@@ -113,19 +113,28 @@ class SFTStreamDataset(IterableDataset):
                     self.premium_file.seek(0)
                     line = self.premium_file.readline()
                 s = json.loads(line)
-                user_text = f"User: {s['prompt']}\nAssistant: "
-                a_text = f"{s['answer']}<|endoftext|>\n"
+                
+                # Support both standard Qwen format and injected OO Gold Sample format
+                if "prompt" in s and "answer" in s:
+                    user_text = f"User: {s['prompt']}\nAssistant: "
+                    a_text = f"{s['answer']}<|endoftext|>\n"
+                elif "content" in s and "task" in s["content"]:
+                    goal = s["content"]["task"]["goal"]
+                    result = s["content"]["result"]
+                    user_text = f"User: {goal}\nAssistant: "
+                    a_text = f"{json.dumps(result)}<|endoftext|>\n"
+                else:
+                    raise KeyError(f"Unknown JSON schema in premium dataset: {list(s.keys())}")
 
-        except Exception:
+        except Exception as e:
+            print(f"SFT Generator Error: {e}")
             user_text = "User: Hello\nAssistant: "
             a_text = "Hello!<|endoftext|>\n"
 
         return user_text, a_text
 
     def _get_next_sample(self) -> Tuple[str, str]:
-        """90% Hermes, 10% Cocktail for balanced multi-domain arm specialization."""
-        if random.random() < 0.90:
-            return self._get_hermes_sample()
+        """100% Cocktail for aggressive Phase 5 injection."""
         return self._get_cocktail_sample()
 
     def __iter__(self) -> Iterator[Tuple[torch.Tensor, torch.Tensor]]:

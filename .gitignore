@@ -4,6 +4,7 @@
 # Caches and outputs
 __pycache__/
 trainer.log
+*.log
 benchmark_*.txt
 telemetry_results*.txt
 
