@@ -425,59 +425,25 @@ def get_dataloader_for_phase(phase, tokenizer, resume_step=0, seq_len=512):
             (ds_code,     20, 'codealpaca',  3),  # domain 3 = code syntax
             (ds_gsm8k,    10, 'gsm8k',       1),
         ]
-
-    # ── Phase 3: Cognitive Bloom ──────────────────────────────────────────────
-    elif phase == '3':
-        print("[DATA] Phase 3: 50% OpenHermes + 25% MetaMath + 25% CodeAlpaca")
-        ds_hermes = load_dataset(
-            "teknium/OpenHermes-2.5",
-            split="train",
-            streaming=True,
-        )
-        ds_metamath = load_dataset(
-            "meta-math/MetaMathQA",
-            split="train",
-            streaming=True,
-        )
-        ds_code = load_dataset(
-            "HuggingFaceH4/CodeAlpaca_20K",
-            split="train",
-            streaming=True,
-        )
+    # ── Phase 3 & Phase 3j: Enriched Cognitive Bloom ─────────────────────────
+    elif phase in ('3', '3j'):
+        print(f"[DATA] Phase {phase}: Enriched Mix (Hermes, MetaMath, Code, ARC, Wiki, CNN, AGNews)")
+        ds_hermes = load_dataset("teknium/OpenHermes-2.5", split="train", streaming=True)
+        ds_metamath = load_dataset("meta-math/MetaMathQA", split="train", streaming=True)
+        ds_code = load_dataset("HuggingFaceH4/CodeAlpaca_20K", split="train", streaming=True)
+        ds_arc = load_dataset("allenai/ai2_arc", "ARC-Challenge", split="train", streaming=True)
+        ds_wiki = load_dataset("wikitext", "wikitext-103-v1", split="train", streaming=True)
+        ds_cnn = load_dataset("cnn_dailymail", "3.0.0", split="train", streaming=True)
+        ds_agnews = load_dataset("ag_news", split="train", streaming=True)
+        
         mix = [
-            (ds_hermes,   50, 'openhermes', 7),  # domain 7 = instruction following
-            (ds_metamath, 25, 'metamath',   1),
-            (ds_code,     25, 'codealpaca', 3),
-        ]
-
-    # ── Phase 3j: Arm Specialization (4 distinct domains) ─────────────────────
-    elif phase == '3j':
-        print("[DATA] Phase 3j: 30% Hermes + 25% MetaMath + 25% CodeAlpaca + 20% CNN")
-        ds_hermes = load_dataset(
-            "teknium/OpenHermes-2.5",
-            split="train",
-            streaming=True,
-        )
-        ds_metamath = load_dataset(
-            "meta-math/MetaMathQA",
-            split="train",
-            streaming=True,
-        )
-        ds_code = load_dataset(
-            "HuggingFaceH4/CodeAlpaca_20K",
-            split="train",
-            streaming=True,
-        )
-        ds_cnn = load_dataset(
-            "cnn_dailymail", "3.0.0",
-            split="train",
-            streaming=True,
-        )
-        mix = [
-            (ds_hermes,   30, 'openhermes',   7),   # instruction following
-            (ds_metamath, 25, 'metamath',      1),   # math reasoning
-            (ds_code,     25, 'codealpaca',    3),   # code syntax
-            (ds_cnn,      20, 'cnn_dailymail', 5),   # summarization
+            (ds_hermes,   25, 'openhermes', 6),   # Arm 6 = Chat
+            (ds_metamath, 15, 'metamath',   1),   # Arm 1 = Logic/Math
+            (ds_code,     15, 'codealpaca', 3),   # Arm 3 = Code
+            (ds_arc,      15, 'arc_reason', 8),   # Arm 8 = Reason
+            (ds_wiki,     10, 'wikitext',   4),   # Arm 4 = Lang
+            (ds_cnn,      10, 'cnn_daily',  14),  # Arm 14 = Gen
+            (ds_agnews,   10, 'ag_news',    7),   # Arm 7 = Fact
         ]
 
     else:
