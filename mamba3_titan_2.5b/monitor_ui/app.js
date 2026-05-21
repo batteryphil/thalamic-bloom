@@ -182,7 +182,7 @@ async function fetchTelemetry() {
 
         const phase = t.phase || '?';
         seqLen = phase === '1' ? 1024 : phase === '2' ? 512 : 768;
-        totalTargetSteps = (phase === '1') ? 50000 : 30000;
+        totalTargetSteps = (phase === '1') ? 50000 : 75000;
 
         // ── Header ──────────────────────────────────────────────────────
         document.getElementById('phase-label').textContent = `Phase ${phase} · LIVE`;

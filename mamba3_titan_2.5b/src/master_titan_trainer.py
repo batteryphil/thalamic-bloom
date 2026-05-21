@@ -809,7 +809,7 @@ def train():
         seq_len      = 512
         WARMUP_STEPS = 300
     elif phase in ('3', '3j'):
-        target_steps = 30_000
+        target_steps = 75_000
         seq_len      = 768   # safe to bump: fresh optimizer, cold-start from phase_2.pt
         WARMUP_STEPS = 500   # longer warmup — Blackboard unfreezes, arms begin specializing
     else:
