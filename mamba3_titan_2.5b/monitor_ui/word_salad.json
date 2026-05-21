@@ -1,0 +1,30 @@
+{
+  "step": 9500,
+  "phase": "3",
+  "timestamp": "2026-05-21 00:24:55",
+  "elapsed_s": 17.17,
+  "avg_rep": 0.131,
+  "quality": "good",
+  "samples": [
+    {
+      "prompt": "<|im_start|>user\nWhat is the capital of Japan?<|im_end|>\n<|im_start|>assistant\n",
+      "output": "Butdomains Livinghendandering cover footnote Corp Vol taxesiency 1870 Living\u0ba4domainsdomainsdomains uitdomainsdomainsitationsdomainsdomainselingdomainsdomains Living Living Livingdomainsdomains ambulance pitcherdomainsdomains}}{{\\domainsdomainshendhendhenddomainsdomains Lettdomainsdomains diagnosedomainsdomains sinedomainsdomains Coca nucleardomainsdomains neutrinos Startdomainsdomains 204domainsdomains lung Workdomainsdomains$]{}domainsdomains -->domainsdomains gestationdomainsdomainsiperhendhend Living Livinghendhendgriddomainsdomainsperpdomainsdomains tv harmlessdomainsdomains Corphendhend\ufffddomainsdomains Voldomainsdomainsliersdomainsdomains___domainsdomains cath sufferhendhendbirthdomainsdomainsLOWdomainsdomainsEFdomains",
+      "rep_rate": 0.057
+    },
+    {
+      "prompt": "<|im_start|>user\nWhat is 2 + 2?<|im_end|>\n<|im_start|>assistant\n",
+      "output": "Butdomainshend Living Corp footnote Vol taxesandering coveriency 1870eling uit\u0ba4domainsdomainsdomainsitationsdomainsdomainshendhendhend pitcherdomainsdomains Living Living Livingdomainsdomains}}{{\\domainsdomains Lettdomainsdomains sinedomainsdomains Coca nucleardomainsdomains diagnosedomainsdomains ambulancedomainsdomains neutrinos mult Living Livinghendhend Living Living Kotdomainsdomains -->domainsdomains lung Workdomainsdomains gestationdomainsdomains$]{}domainsdomains tv harmlessdomainsdomains___domainsdomainsliersdomainsdomainsperpdomainsdomainsgrid Living Living Corpdomainsdomains Voldomainsdomains Corpdomains Livingdomains LivinghenddomainsdomainsLOWdomainsdomains\ufffddomainsdomains 204domainsdomains Smhendhenddomains Living Vol",
+      "rep_rate": 0.209
+    },
+    {
+      "prompt": "<|im_start|>user\nWhat is the chemical formula for water?<|im_end|>\n<|im_start|>assistant\n",
+      "output": "Butdomains Livinghend Corp Vol footnote\u0ba4domainsdomainsdomains 1870iency taxesandering Starthendhendhend pitcher Living Living Living uit Living Livingdomainsdomainselingdomainsdomainshendhend Living Livingitationsdomainsdomains}}{{\\domainsdomains Lettdomainsdomains ambulancedomainsdomains Living Livinghendhend sine tv coverdomainsdomains Coca harmlessdomainsdomains neutrinos nucleardomainsdomainsliersdomainsdomains$]{}domainsdomains diagnosedomainsdomains -->domainsdomains lung Workdomainsdomainsperpdomainsdomains___domainsdomains gestationdomainsdomains\ufffddomainsdomains 204domainsdomains cath narrowlydomainsdomainsgridhendhenddomainsdomainsLOWdomainsdomains Corpdomainsdomains Voldomainsdomains Kotdomainsdomainsiperdomainsdomainsanti",
+      "rep_rate": 0.128
+    },
+    {
+      "prompt": "<|im_start|>user\nWrite a Python function that returns the square of a number.<|im_end|>\n<|im_start|>assistant\n",
+      "output": "Butdomains Livinghend Corp Voldomainsdomainsdomainsiency footnote\u0ba4 taxesandering coverdomainsdomainseling 1870 Living Living Living uit pitcher Living Livingdomainsdomainshendhendhend sinedomainsdomainsitationsdomainsdomains Living Living}}{{\\domainsdomains Lettdomainsdomains ambulancedomainsdomains -->domainsdomains diagnosedomainsdomains Coca harmlessdomainsdomains neutrinos nucleardomainsdomains lung Workdomainsdomains gestationdomainsdomainsgriddomainsdomains$]{}domainsdomainsliersdomainsdomains\ufffddomainsdomainsLOW Living Livinghendhenddomainsdomains tv Startdomainsdomainsiperdomainsdomainsperpdomainsdomains Kotdomainsdomains 204domainsdomains___domainsdomainsantidomainsdomains transformingdomainsdomains cath nucleardomainshenddomains Livingdomains",
+      "rep_rate": 0.128
+    }
+  ]
+}

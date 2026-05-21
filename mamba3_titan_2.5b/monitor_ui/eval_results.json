@@ -1,0 +1,12 @@
+{
+  "phase": "1",
+  "perplexity": 485165195.41,
+  "avg_nll": 24.0082,
+  "coherence_score": "0/5",
+  "coherence_pct": 0.0,
+  "repetition_rate": 0.9333,
+  "ppl_verdict": "\ud83d\udd34 EARLY \u2014 still largely random",
+  "coh_verdict": "\ud83d\udd34 INCOHERENT \u2014 expected at this stage",
+  "rep_verdict": "\ud83d\udd34 HIGH repetition \u2014 model is looping",
+  "timestamp": "2026-05-19 17:49:17"
+}

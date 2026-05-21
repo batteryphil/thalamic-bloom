@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JARVIS V5 // Titan Monitor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<div class="dashboard-container">
+
+    <!-- HEADER -->
+    <header class="glass-panel header">
+        <div class="logo">
+            <h1>JARVIS V5 <span class="highlight">TITAN</span></h1>
+            <p>2.54B · 16-Arm MIMO · Mamba3 · <span id="phase-label">WAITING</span></p>
+        </div>
+        <div class="header-right">
+            <div id="phase3j-alert" class="phase3j-alert hidden">⚡ PHASE 3J READY</div>
+            <div class="status-indicator">
+                <span class="pulse" id="pulse-dot"></span>
+                <span id="status-text">Connecting...</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- PROGRESS BAR -->
+    <div class="glass-panel progress-panel">
+        <div class="progress-header">
+            <span id="progress-label">Step 0 / 30,000</span>
+            <span id="eta-label">ETA: —</span>
+        </div>
+        <div class="progress-track">
+            <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+        </div>
+        <div class="progress-footer">
+            <span id="progress-pct">0.0%</span>
+            <span id="tokens-processed">0 tokens seen</span>
+        </div>
+    </div>
+
+    <!-- TOP METRIC CARDS ROW 1 -->
+    <div class="grid grid-6">
+        <div class="glass-panel metric-card">
+            <h3>LM Loss</h3>
+            <h2 id="loss-metric">—</h2>
+            <div class="metric-sub" id="loss-floor">floor —</div>
+        </div>
+        <div class="glass-panel metric-card">
+            <h3>Grad Norm</h3>
+            <h2 id="gnorm-metric">—</h2>
+            <div class="metric-sub" id="gnorm-status">—</div>
+        </div>
+        <div class="glass-panel metric-card">
+            <h3>Learn Rate</h3>
+            <h2 id="lr-metric">—</h2>
+            <div class="metric-sub" id="lr-phase">warmup</div>
+        </div>
+        <div class="glass-panel metric-card">
+            <h3>Tokens / sec</h3>
+            <h2 id="tps-metric">—</h2>
+            <div class="metric-sub" id="tps-seq">seq=—</div>
+        </div>
+        <div class="glass-panel metric-card">
+            <h3>GPU Temp</h3>
+            <h2 id="temp-metric">—</h2>
+            <div class="metric-sub" id="temp-status">—</div>
+        </div>
+        <div class="glass-panel metric-card">
+            <h3>Domain Loss</h3>
+            <h2 id="domain-metric">—</h2>
+            <div class="metric-sub">3j only</div>
+        </div>
+    </div>
+
+    <!-- ARM / COGNITIVE METRICS ROW 2 -->
+    <div class="grid grid-4">
+        <div class="glass-panel metric-card">
+            <h3>Routing Entropy</h3>
+            <h2 id="entropy-metric">—</h2>
+            <div class="metric-sub" id="entropy-pct">— / 2.773 max</div>
+        </div>
+        <div class="glass-panel metric-card">
+            <h3>Gate Score</h3>
+            <h2 id="gate-metric">—</h2>
+            <div class="metric-sub">arm routing weight</div>
+        </div>
+        <div class="glass-panel metric-card collapse-card" id="collapse-card">
+            <h3>Arm Collapse <span class="loss-note">Phase 3j trigger</span></h3>
+            <h2 id="collapse-metric">—</h2>
+            <div class="collapse-bar-track">
+                <div class="collapse-bar-fill" id="collapse-bar"></div>
+                <div class="collapse-threshold"></div>
+            </div>
+            <div class="metric-sub" id="collapse-status">monitoring...</div>
+        </div>
+        <div class="glass-panel metric-card">
+            <h3>Latent Energy</h3>
+            <h2 id="energy-metric">—</h2>
+            <div class="metric-sub">hidden state ‖x‖²</div>
+        </div>
+    </div>
+
+    <!-- CHARTS ROW 1: Loss + Grad Norm -->
+    <div class="charts-grid">
+        <div class="glass-panel chart-container">
+            <h3>Loss Trajectory <span class="loss-note">last 200 steps</span></h3>
+            <canvas id="lossChart"></canvas>
+        </div>
+        <div class="glass-panel chart-container">
+            <h3>Gradient Norm <span class="loss-note">last 200 steps</span></h3>
+            <canvas id="gnormChart"></canvas>
+        </div>
+    </div>
+
+    <!-- CHARTS ROW 2: TPS + LR -->
+    <div class="charts-grid">
+        <div class="glass-panel chart-container">
+            <h3>Throughput (TPS)</h3>
+            <canvas id="tpsChart"></canvas>
+        </div>
+        <div class="glass-panel chart-container">
+            <h3>Learning Rate Schedule</h3>
+            <canvas id="lrChart"></canvas>
+        </div>
+    </div>
+
+    <!-- CHARTS ROW 3: Entropy + Collapse -->
+    <div class="charts-grid">
+        <div class="glass-panel chart-container">
+            <h3>Routing Entropy <span class="loss-note">arms diverging → Phase 3j</span></h3>
+            <canvas id="entropyChart"></canvas>
+        </div>
+        <div class="glass-panel chart-container">
+            <h3>GPU Temperature</h3>
+            <canvas id="tempChart"></canvas>
+        </div>
+    </div>
+
+    <!-- ARM DIVERGENCE PANEL -->
+    <div class="glass-panel arm-diverg-panel">
+        <div class="arm-diverg-header">
+            <h3>Arm Divergence <span class="loss-note">per-arm mean cosine similarity to peers · 1.0=clone · 0.0=specialist</span></h3>
+            <div class="arm-diverg-summary">
+                <span>Mean: <strong id="collapse-mean">—</strong></span>
+                <span>Max (worst): <strong id="collapse-max">—</strong></span>
+                <span class="phase3j-badge hidden" id="phase3j-badge">⚡ ALL ARMS DIVERGED → 3J READY</span>
+            </div>
+        </div>
+        <div class="arm-diverg-bars" id="arm-diverg-bars">
+            <!-- 16 bars filled by JS -->
+        </div>
+        <div class="arm-diverg-labels" id="arm-diverg-labels"></div>
+        <div class="arm-threshold-note">Phase 3j fires when MAX bar drops below <strong>0.70</strong> — meaning every arm is genuinely separate</div>
+    </div>
+
+    <!-- 16-ARM ROUTING WEIGHTS -->
+    <div class="glass-panel arm-panel">
+        <h3>16-Arm Routing Weights <span class="loss-note">live · uniform = arms not yet specialized</span></h3>
+        <div class="arm-bars" id="arm-bars"></div>
+        <div class="arm-labels" id="arm-labels"></div>
+    </div>
+
+    <!-- WORD SALAD PANEL -->
+    <div class="glass-panel salad-panel" id="salad-panel">
+        <div class="salad-header">
+            <div class="salad-title">
+                <span class="salad-icon">🧠</span>
+                <h3>Word Salad <span class="loss-note">greedy decode · every 250 steps</span></h3>
+            </div>
+            <div class="salad-meta" id="salad-meta">Waiting for first generation...</div>
+        </div>
+        <div class="salad-grid" id="salad-grid">
+            <div class="salad-card skeleton"><div class="salad-prompt">—</div><div class="salad-output">Waiting...</div></div>
+            <div class="salad-card skeleton"><div class="salad-prompt">—</div><div class="salad-output">Waiting...</div></div>
+            <div class="salad-card skeleton"><div class="salad-prompt">—</div><div class="salad-output">Waiting...</div></div>
+            <div class="salad-card skeleton"><div class="salad-prompt">—</div><div class="salad-output">Waiting...</div></div>
+        </div>
+    </div>
+
+</div>
+<script src="app.js?v=phase3b"></script>
+</body>
+</html>
