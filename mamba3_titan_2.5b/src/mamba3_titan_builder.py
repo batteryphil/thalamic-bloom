@@ -205,7 +205,14 @@ class Mamba3Titan(nn.Module):
             # Re-zero bb_read to guarantee silence regardless of checkpoint state
             with torch.no_grad():
                 nn.init.zeros_(self.bb_read.weight)
-        print(f"Titan Architecture → Phase {phase}  (Blackboard {'ACTIVE' if bb_active else 'FROZEN/SILENT'})")
+                
+        # ── Asymmetric Freeze (Phase 3j) ─────────────────────────────────────
+        # Arms train normally in Phases 1, 2, 3. In Phase 3j, they are frozen.
+        arms_active = phase in ('1', '2', '3')
+        for p in self.mimo_reasoning_blocks.parameters():
+            p.requires_grad_(arms_active)
+            
+        print(f"Titan Architecture → Phase {phase}  (Blackboard {'ACTIVE' if bb_active else 'FROZEN/SILENT'} | Arms {'TRAINING' if arms_active else 'FROZEN'})")
 
     # ── Asymmetric arm init ───────────────────────────────────────────────────
     def initialize_asymmetric_arms(self) -> None:
