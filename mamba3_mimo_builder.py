@@ -2,46 +2,77 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Set, List
-from mamba_ssm import Mamba
 
-class DummyMambaSSM(nn.Module):
+try:
+    from mamba_ssm import Mamba
+    HAS_MAMBA = True
+except ImportError:
+    HAS_MAMBA = False
+
+class PureMambaSSM(nn.Module):
     """
-    Placeholder for the core Mamba state-space scan to allow testing without CUDA compilation.
-    In production, swap this with `mamba_ssm.Mamba`.
+    Pure PyTorch Mamba S6 Selective State Space Model.
+    Runs on CPU and AMD ROCm GPU without CUDA compilation.
+    Matches the exact state_dict layout of official mamba_ssm.Mamba.
     """
-    def __init__(self, d_model: int) -> None:
-        """
-        Initialize the dummy Mamba SSM.
-        
-        Args:
-            d_model (int): The dimensionality of the input and output features.
-        """
+    def __init__(self, d_model: int = 768, d_state: int = 16, d_conv: int = 4, expand: int = 2) -> None:
         super().__init__()
-        self.proj = nn.Linear(d_model, d_model, bias=False)
-        
+        self.d_model = d_model
+        self.d_state = d_state
+        self.d_conv = d_conv
+        self.d_inner = d_model * expand
+        self.dt_rank = max(d_model // 16, 1)
+
+        self.in_proj = nn.Linear(d_model, self.d_inner * 2, bias=False)
+        self.conv1d = nn.Conv1d(
+            in_channels=self.d_inner,
+            out_channels=self.d_inner,
+            kernel_size=d_conv,
+            padding=d_conv - 1,
+            groups=self.d_inner,
+            bias=True,
+        )
+        self.x_proj = nn.Linear(self.d_inner, self.dt_rank + d_state * 2, bias=False)
+        self.dt_proj = nn.Linear(self.dt_rank, self.d_inner, bias=True)
+
+        A = torch.arange(1, d_state + 1, dtype=torch.float32).unsqueeze(0).expand(self.d_inner, -1).contiguous()
+        self.A_log = nn.Parameter(torch.log(A))
+        self.D = nn.Parameter(torch.ones(self.d_inner))
+        self.out_proj = nn.Linear(self.d_inner, d_model, bias=False)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass for the dummy Mamba SSM.
-        
-        Args:
-            x (torch.Tensor): Input tensor of shape (batch_size, sequence_length, d_model).
-            
-        Returns:
-            torch.Tensor: Projected tensor of the same shape.
-        """
-        return self.proj(x)
+        batch, seq_len, _ = x.shape
+        xz = self.in_proj(x)
+        x_branch, z = xz.chunk(2, dim=-1)
+
+        x_conv = x_branch.transpose(1, 2)
+        x_conv = self.conv1d(x_conv)[:, :, :seq_len]
+        x_conv = x_conv.transpose(1, 2)
+        x_branch = F.silu(x_conv)
+
+        x_dbc = self.x_proj(x_branch)
+        dt, B, C = torch.split(x_dbc, [self.dt_rank, self.d_state, self.d_state], dim=-1)
+        dt = torch.clamp(F.softplus(self.dt_proj(dt)), min=1e-4, max=10.0)
+
+        A = -torch.exp(self.A_log.float()).to(dt.dtype)
+        dt_A = torch.clamp(torch.einsum('btd,dn->btdn', dt, A), min=-20.0, max=0.0)
+        A_bar = torch.exp(dt_A)
+        dt_B = torch.einsum('btd,btn->btdn', dt, B)
+
+        h = torch.zeros(batch, self.d_inner, self.d_state, device=x.device, dtype=x.dtype)
+        ys = []
+        for t in range(seq_len):
+            h = A_bar[:, t] * h + dt_B[:, t] * x_branch[:, t].unsqueeze(-1)
+            y_t = torch.einsum('bdn,bn->bd', h, C[:, t]) + self.D * x_branch[:, t]
+            ys.append(y_t)
+        y = torch.stack(ys, dim=1)
+        y = y * F.silu(z)
+        return self.out_proj(y)
+
 
 class ConceptPerceptron(nn.Module):
     """Global context pooling mechanism mapping the input sequence into a condensed latent prefix."""
     def __init__(self, d_model: int, num_tokens: int = 16, chunk_size: int = 1024) -> None:
-        """
-        Initialize the Concept Perceptron.
-        
-        Args:
-            d_model (int): Hidden size of the model.
-            num_tokens (int): The number of tokens in the condensed latent prefix.
-            chunk_size (int): Size of chunks to process to bypass long-context SSM saturation.
-        """
         super().__init__()
         self.num_tokens = num_tokens
         self.chunk_size = chunk_size
@@ -50,352 +81,289 @@ class ConceptPerceptron(nn.Module):
         self.proj = nn.Linear(d_model * 2, d_model)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass to process the input sequence and generate the concept scratchpad.
-        
-        Args:
-            x (torch.Tensor): Input sequence tensor of shape (B, L, D).
-            
-        Returns:
-            torch.Tensor: Condensed latent prefix of shape (B, num_tokens, D).
-        """
         B, L, D = x.shape
         chunks: List[torch.Tensor] = []
-        
-        # Handle chunked inference natively for context windows > 1024 tokens
         for i in range(0, L, self.chunk_size):
             chunk = x[:, i:i+self.chunk_size, :]
-            # Transpose for AdaptiveAvgPool1d: (B, L_chunk, D) -> (B, D, L_chunk)
             chunk_t = chunk.transpose(1, 2)
             avg_pool = self.avg_pooling(chunk_t).transpose(1, 2)
             max_pool = self.max_pooling(chunk_t).transpose(1, 2)
-            
-            # Suction-Cup Granular Anchoring: Concatenate global and granular features
             pooled_chunk = torch.cat([avg_pool, max_pool], dim=-1)
             chunks.append(pooled_chunk)
         
-        # Aggregate chunk scratchpads
         aggregated = torch.stack(chunks, dim=0).mean(dim=0)
         return F.silu(self.proj(aggregated))
+
 
 class LowRankBridge(nn.Module):
     """Bottleneck compression bridge routing into auxiliary reasoning engines."""
     def __init__(self, d_model: int, bottleneck: int = 64) -> None:
-        """
-        Initialize the Low-Rank Latent Bridge.
-        
-        Args:
-            d_model (int): Full model dimension.
-            bottleneck (int): Compressed dimension.
-        """
         super().__init__()
         self.down = nn.Linear(d_model, bottleneck, bias=False)
         self.up = nn.Linear(bottleneck, d_model, bias=False)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass through the compression bottleneck.
-        
-        Args:
-            x (torch.Tensor): Input tensor.
-            
-        Returns:
-            torch.Tensor: Reconstructed tensor.
-        """
         return self.up(F.silu(self.down(x)))
 
+
 class MambaLayer(nn.Module):
-    """Mamba layer enforcing strict bfloat16 precision."""
+    """Mamba SSM layer with pre-norm and residual."""
     def __init__(self, d_model: int) -> None:
-        """
-        Initialize the Mamba Layer.
-        
-        Args:
-            d_model (int): Hidden size of the model.
-        """
         super().__init__()
         self.norm = nn.LayerNorm(d_model)
-        # Use real Mamba instead of Dummy
-        self.ssm = Mamba(d_model=d_model, d_state=16, d_conv=4, expand=2)
+        if HAS_MAMBA:
+            self.ssm = Mamba(d_model=d_model, d_state=16, d_conv=4, expand=2)
+        else:
+            self.ssm = PureMambaSSM(d_model=d_model, d_state=16, d_conv=4, expand=2)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass applying the SSM layer with residual connection.
-        
-        Args:
-            x (torch.Tensor): Input tensor.
-            
-        Returns:
-            torch.Tensor: Output tensor with residual connection added.
-        """
         residual = x
         x_norm = self.norm(x)
-        
-        # Mandatory precision constraint: SSM strictly evaluated in bfloat16
         device_type = x.device.type if x.device.type in ['cuda', 'cpu'] else 'cpu'
         with torch.autocast(device_type=device_type, dtype=torch.bfloat16):
             x_ssm = self.ssm(x_norm)
-            
         return x_ssm.to(x.dtype) + residual
 
+
 class Mamba3MIMORLF(nn.Module):
-    """Mamba 3 MIMO architecture with parallel latent forcing."""
-    def __init__(self, vocab_size: int = 50304, d_model: int = 768, n_layers: int = 24, mimo_paths: int = 4) -> None:
-        """
-        Initialize the Mamba 3 MIMO model.
-        
-        Args:
-            vocab_size (int): Size of the token vocabulary.
-            d_model (int): Dimension of the model.
-            n_layers (int): Number of sequential Mamba layers.
-            mimo_paths (int): Number of parallel MIMO streams.
-        """
+    """
+    Mamba 3 MIMO architecture with Sparse IPC Blackboard (Corpus Callosum)
+    and Mid-Backbone Semantic Routing.
+    """
+    def __init__(
+        self,
+        vocab_size: int = 50304,
+        d_model: int = 768,
+        n_layers: int = 24,
+        mimo_paths: int = 4,
+        bus_dim: int = 64,
+    ) -> None:
         super().__init__()
         self.vocab_size = vocab_size
         self.d_model = d_model
         self.mimo_paths = mimo_paths
+        self.n_layers = n_layers
+        self._mid = n_layers // 2  # layer 12 — where mid-backbone semantic routing occurs
         
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.cp = ConceptPerceptron(d_model)
         self.thalamic_primer = MambaLayer(d_model)
         self.bridge = LowRankBridge(d_model)
         
-        # Main Sequential Backbone
+        # Main Sequential Backbone (24 layers total, split at midpoint)
         self.layers = nn.ModuleList([MambaLayer(d_model) for _ in range(n_layers)])
         
-        # MIMO Engine: Parallel Latent Reasoning Chains
+        # MIMO Engine: 4 Parallel Reasoning Chains
         self.mimo_reasoning_blocks = nn.ModuleList([MambaLayer(d_model) for _ in range(mimo_paths)])
         
-        # Latent IPC (Cross-Talk)
-        self.ipc_mixer = nn.Linear(d_model * mimo_paths, d_model * mimo_paths)
+        # ── SPATIAL MEMORY: Sparse IPC Blackboard (Corpus Callosum) ──────────
+        # Replaces the dense 1B-parameter IPC mixer with a 64-dim bottleneck bus
+        self.bus_dim = bus_dim
+        self.bb_write = nn.Linear(d_model, self.bus_dim, bias=False)
+        self.bb_read = nn.Linear(self.bus_dim, d_model, bias=False)
+        nn.init.zeros_(self.bb_read.weight)  # Zero-init: Blackboard starts silent, additive residual
         
-        # Synaptic Dam: Gated Tanh for global context injection
-        self.cp_gate = nn.Parameter(torch.tensor(0.01))
-        
-        self.norm_f = nn.LayerNorm(d_model)
-        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
-        self.lm_head.weight = self.embedding.weight  # Weight tying
-        
-        # Phase 3j: Per-arm competitive vector router
-        self.domain_router = nn.Linear(self.d_model, self.mimo_paths, bias=True)
+        # Mid-backbone semantic router with learnable temperature
+        self.domain_router = nn.Linear(d_model, mimo_paths, bias=True)
+        self.router_temp = nn.Parameter(torch.ones(1) * 1.0)
         nn.init.normal_(self.domain_router.weight, mean=0.0, std=0.01)
         nn.init.zeros_(self.domain_router.bias)
+        
+        # Synaptic Dam: Calibrated Gated Tanh for global context injection
+        # Clamped/initialized small to prevent broadcast saturation
+        self.cp_gate = nn.Parameter(torch.tensor(0.02))
+        
+        self.norm_f = nn.LayerNorm(d_model)
+        # UNTIED LM HEAD: independent weights prevent embedding table degradation
+        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
         
         self.last_telemetry = {
             'arm_collapse_metric': 0.0,
             'latent_energy': 0.0,
             'gate_score': 0.0,
-            'primer_delta': 0.0
+            'primer_delta': 0.0,
+            'route_weights': [1.0 / mimo_paths] * mimo_paths,
+            'entropy': 0.0
         }
         
         # Zero-Init Thalamic Primer for Identity Pass-through
-        nn.init.zeros_(self.thalamic_primer.ssm.out_proj.weight)
-        
+        if hasattr(self.thalamic_primer.ssm, 'out_proj'):
+            nn.init.zeros_(self.thalamic_primer.ssm.out_proj.weight)
+            
     def initialize_asymmetric_arms(self) -> None:
-        """
-        Asymmetric Initialization (Decentralized Ganglionic Processing).
-        Applies orthogonal weights so loops specialize in different domains.
-        """
+        """Applies orthogonal weights and breaks temporal symmetry in 1D SSM parameters."""
         for name, param in self.mimo_reasoning_blocks.named_parameters():
             if 'weight' in name and param.dim() >= 2:
                 nn.init.orthogonal_(param)
             elif param.dim() == 1:
-                # Break temporal symmetry in A_log, D, dt_bias, etc.
                 with torch.no_grad():
                     param.add_(torch.randn_like(param) * 0.05)
-        
-    def forward(self, input_ids: torch.Tensor, loop_idx: int = 0) -> torch.Tensor:
+
+    def load_legacy_checkpoint(self, checkpoint_path: str, device: torch.device) -> None:
         """
-        Forward pass executing parallel reasoning chains.
-        
-        Args:
-            input_ids (torch.Tensor): Integer token IDs of shape (batch, seq_len).
-            loop_idx (int): Current RLF loop index to calculate Latent Lifeline Decay.
-            
-        Returns:
-            torch.Tensor: Output logits of shape (batch, seq_len, vocab_size).
+        Loads checkpoint weights with graceful adaptation:
+        1. Breaks weight-tying between lm_head and embedding.
+        2. Filters out deprecated ipc_mixer weights while preserving backbone/arms.
+        3. Initializes Blackboard cleanly.
         """
+        ckpt = torch.load(checkpoint_path, map_location=device)
+        sd = ckpt['model_state_dict'] if isinstance(ckpt, dict) and 'model_state_dict' in ckpt else (
+            ckpt['model'] if isinstance(ckpt, dict) and 'model' in ckpt else ckpt
+        )
+        
+        # Filter out ipc_mixer keys
+        filtered_sd = {k: v for k, v in sd.items() if not k.startswith('ipc_mixer.')}
+        
+        missing, unexpected = self.load_state_dict(filtered_sd, strict=False)
+        print(f"[Loader] Loaded checkpoint. Missing: {len(missing)}, Ignored/Unexpected: {len(unexpected)}")
+        
+        # Explicitly break weight tie on lm_head
+        with torch.no_grad():
+            self.lm_head.weight = nn.Parameter(self.lm_head.weight.clone())
+            # Cap cp_gate to avoid broadcast saturation
+            if self.cp_gate.data > 0.05:
+                print(f"[Loader] Clamping saturated cp_gate ({self.cp_gate.data.item():.4f} -> 0.02)")
+                self.cp_gate.data.fill_(0.02)
+        
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        loop_idx: int = 0,
+        ablate_cp: bool = False,
+        ablate_mimo: bool = False
+    ) -> torch.Tensor:
+        """
+        Forward pass with Mid-Backbone Semantic Routing and Sparse Blackboard.
+        """
+        B, L = input_ids.shape
+        device = input_ids.device
+        
         orig_embs = self.embedding(input_ids)
-        
-        # Latent Lifeline Decay
         decay_factor = 0.7 ** loop_idx
         x = orig_embs * decay_factor
         
         # Concept Perceptron generating the condensed scratchpad
         cp_scratchpad = self.cp(x)
         
-        # A. The Thalamic Primer: Temporal Sequence Mixing before routing
+        # Thalamic Primer
         primer_out = self.thalamic_primer(orig_embs)
-        
-        # --- SCALE-INVARIANT ANGULAR DEFORMATION ROUTER ---
-        # Measure angular deviation instead of L2 distance to prevent saturation
-        with torch.no_grad():
-            primer_cos_sim = F.cosine_similarity(orig_embs, primer_out, dim=-1)
-            # Invert so 0.0 = identity (no deviation), bounding max deviation up to 2.0
-            primer_delta = (1.0 - primer_cos_sim).mean().detach()
-
-        # Scale the geometric deviation (tune multiplier to 20.0 to account for smaller cosine values)
-        routing_signal = primer_delta
-        
-        # Blend: add Primer signal into main stream
         x = orig_embs + primer_out * 0.1
         
-        # Route into Auxiliary Loop Engine via Dynamic Bridge
-        bridge_out = self.bridge(x)
-        
-        # Phase 3j: Temporal Vector Gating
-        # The domain_router MUST be part of the autograd graph to learn specializations.
-        # We only detach primer_out to protect the upstream backbone.
-        route_logits = self.domain_router(primer_out.detach())  # (B, L, 4)
-
-        competitive_weights = F.softmax(route_logits, dim=-1)
-        
-        # 1. Find the winning arm for each token
-        top_indices = competitive_weights.argmax(dim=-1, keepdim=True)
-        
-        # 2. Create a Hard Binary Mask (1 for winner, 0 for losers)
-        mask = torch.zeros_like(competitive_weights).scatter_(-1, top_indices, 1.0)
-        
-        # 3. Straight-Through Estimator: Forward = Hard Mask, Backward = Softmax
-        hard_weights = mask - competitive_weights.detach() + competitive_weights
-        
-        # 4. Trickle charge maintains 0.05 minimum for dormant arms
-        route_weights = torch.clamp(hard_weights, min=0.05)
-        route_weights = route_weights / route_weights.sum(dim=-1, keepdim=True)
-        
-        parallel_states = []
-        autotomic_gates_list = []
-        for i in range(self.mimo_paths):
-            state = self.mimo_reasoning_blocks[i](bridge_out)
-            
-            # B. Post-Compute Autotomy (Evaluate Hallucination before IPC pollution)
-            variance = state.var(dim=-1).mean()
-            # --- OCTOPODA TRICKLE-CHARGE PATCH ---
-            # Clamp the autotomic gate to prevent total gradient death on highly variant paths
-            autotomic_gate = torch.clamp(torch.sigmoid((10.0 - variance) * 0.5), min=0.05)
-            autotomic_gates_list.append(autotomic_gate.item() if isinstance(autotomic_gate, torch.Tensor) else autotomic_gate)
-            
-            # Apply per-token vector weight for this arm (B, L, 1) for broadcasting
-            arm_weight = route_weights[..., i:i+1]  # (B, L, 1)
-
-            # Arm 0 always gets full gradient (primary cortex, preserved)
-            if i == 0:
-                parallel_states.append(state * autotomic_gate)
-            else:
-                parallel_states.append(state * arm_weight * autotomic_gate)
-            
-        mean_gate = route_weights[..., 1:].mean().item()
-        
-        # Calculate Orthogonal Regularization Loss (Repulsive Magnets)
-        if self.training:
-            sim_01 = F.cosine_similarity(parallel_states[0], parallel_states[1], dim=-1).mean()
-            sim_02 = F.cosine_similarity(parallel_states[0], parallel_states[2], dim=-1).mean()
-            sim_03 = F.cosine_similarity(parallel_states[0], parallel_states[3], dim=-1).mean()
-            self.ortho_loss = (sim_01 + sim_02 + sim_03) / 3.0
-        else:
-            self.ortho_loss = 0.0
-        
-        # =====================================================================
-        # DYNAMICAL SYSTEMS TELEMETRY PROBES (No Gradient Tracking)
-        # =====================================================================
-        # Sample ~5% of batches to save compute and keep TPS high
-        if not self.training or (self.training and torch.rand(1).item() < 0.05):
-            with torch.no_grad():
-                # 1. LATENT COSINE SEPARATION (Arm Divergence)
-                # 1.0 = Mode Collapse (Redundant). 0.0 = Orthogonal Specialization.
-                arm_0, arm_1, arm_2, arm_3 = parallel_states
-                
-                sim_01 = F.cosine_similarity(arm_0, arm_1, dim=-1).mean()
-                sim_02 = F.cosine_similarity(arm_0, arm_2, dim=-1).mean()
-                sim_03 = F.cosine_similarity(arm_0, arm_3, dim=-1).mean()
-                
-                avg_collapse_metric = (sim_01 + sim_02 + sim_03) / 3.0
-                
-                # 2. RECURRENT ATTRACTOR STABILITY (Latent Energy)
-                latent_energy = torch.stack(parallel_states).norm(dim=-1).mean()
-                
-                self.last_telemetry.update({
-                    'arm_collapse_metric': avg_collapse_metric.item(),
-                    'latent_energy': latent_energy.item(),
-                    'primer_delta': primer_delta.item() if isinstance(primer_delta, torch.Tensor) else primer_delta
-                })
-        # =====================================================================
-        
-        # Latent IPC Cross-Talk
-        ipc_in = torch.cat(parallel_states, dim=-1)
-        ipc_out = self.ipc_mixer(ipc_in)
-        
-        # Split back to individual paths
-        final_states = torch.split(ipc_out, self.d_model, dim=-1)
-        
-        self.last_telemetry.update({
-            "entropy": routing_signal.item() if isinstance(routing_signal, torch.Tensor) else routing_signal,
-            "gate_score": mean_gate,
-            "autotomic_gates": autotomic_gates_list,
-            "route_weights": route_weights.mean(dim=(0, 1)).tolist()  # Per-arm mean
-        })
-            
-        # Collapse multiple latent paths back into the residual stream
-        x = x + (sum(final_states) / self.mimo_paths)
-        
-        for i, layer in enumerate(self.layers):
+        # ── First half of backbone (layers 0 ... _mid-1) ──────────────
+        for i, layer in enumerate(self.layers[:self._mid]):
             x = layer(x)
-            
-            # Deep Injection: global context residually injected every 6 layers
-            if (i + 1) % 6 == 0:
+            if (i + 1) % 6 == 0 and not ablate_cp:
                 global_ctx = cp_scratchpad.mean(dim=1, keepdim=True)
-                # Synaptic Dam: Bounded injection to prevent broadcast storm
-                x = x + (self.cp_gate * torch.tanh(global_ctx))
+                eff_gate = torch.clamp(self.cp_gate, max=0.05)
+                x = x + (eff_gate * torch.tanh(global_ctx))
+                
+        # ── Mid-Backbone Semantic Routing ──────────────────────────────
+        # Routing is computed from rich mid-backbone semantic features (layer 12)
+        mid_hidden = x
+        route_logits = self.domain_router(mid_hidden.detach() if self.training else mid_hidden)
+        
+        if self.training:
+            # Exploration noise during training
+            noise = torch.randn_like(route_logits) * 0.05
+            route_logits = route_logits + noise
+            
+        temp = torch.clamp(self.router_temp, min=0.1, max=10.0)
+        route_weights = F.softmax(route_logits / temp, dim=-1) # (B, L, 4)
+        
+        # Switch Transformer quadratic load balancing loss: 4 * sum(mu_i^2) - 1.0
+        if self.training:
+            mu = route_weights.mean(dim=(0, 1))
+            self.load_balance_loss = 0.15 * (self.mimo_paths * (mu ** 2).sum() - 1.0)
+        else:
+            self.load_balance_loss = torch.tensor(0.0, device=device)
+            
+        # ── MIMO Arms Computation ──────────────────────────────────────
+        if not ablate_mimo:
+            bridge_out = self.bridge(x)
+            raw_arm_outs = []
+            for i in range(self.mimo_paths):
+                arm_out = self.mimo_reasoning_blocks[i](bridge_out)
+                raw_arm_outs.append(arm_out)
+            
+            # stacked_states: (B, L, d_model, 4)
+            stacked_states = torch.stack(raw_arm_outs, dim=-1)
+            
+            # ── SPATIAL MEMORY: Sparse IPC Blackboard ──────────────────
+            # Silence threshold: only arms with route_weight > 0.01 participate
+            comm_mask = (route_weights > 0.01).float().detach()
+            speaking_weights = route_weights * comm_mask
+            
+            # Project to bus dimension: (B, L, 4, d_model) -> (B, L, 4, bus_dim)
+            states_for_bus = stacked_states.transpose(-1, -2)
+            bb_writes = self.bb_write(states_for_bus.to(self.bb_write.weight.dtype)).to(x.dtype)
+            weighted_writes = bb_writes * speaking_weights.unsqueeze(-1)
+            
+            # Consensus blackboard
+            blackboard = weighted_writes.sum(dim=-2) # (B, L, bus_dim)
+            
+            # Broadcast back to active arms
+            shared_context = self.bb_read(blackboard.to(self.bb_read.weight.dtype)).to(x.dtype) # (B, L, d_model)
+            gated_broadcast = shared_context.unsqueeze(-1) * comm_mask.unsqueeze(-2)
+            stacked_states = stacked_states + gated_broadcast
+            
+            # Collapse MIMO arms with routing weights
+            collapsed_mimo = torch.einsum('b l d m, b l m -> b l d', stacked_states, route_weights)
+            x = x + collapsed_mimo
+            
+        # ── Second half of backbone (layers _mid ... end) ─────────────
+        for i, layer in enumerate(self.layers[self._mid:], start=self._mid):
+            x = layer(x)
+            if (i + 1) % 6 == 0 and not ablate_cp:
+                global_ctx = cp_scratchpad.mean(dim=1, keepdim=True)
+                eff_gate = torch.clamp(self.cp_gate, max=0.05)
+                x = x + (eff_gate * torch.tanh(global_ctx))
                 
         x = self.norm_f(x)
         logits = self.lm_head(x)
+        
+        # Telemetry
+        with torch.no_grad():
+            self.last_telemetry['route_weights'] = route_weights.mean(dim=(0, 1)).tolist()
+            entropy = -(route_weights * torch.log(route_weights + 1e-8)).sum(dim=-1).mean().item()
+            self.last_telemetry['entropy'] = entropy
+            self.last_telemetry['gate_score'] = route_weights[..., 1:].mean().item()
+            
         return logits
 
     @torch.no_grad()
     def generate(
-        self, 
-        input_ids: torch.Tensor, 
-        max_new_tokens: int = 50, 
-        temperature: float = 0.3, 
-        top_k: int = 5, 
-        stop_sequences: Optional[Set[int]] = None
+        self,
+        input_ids: torch.Tensor,
+        max_new_tokens: int = 50,
+        temperature: float = 0.3,
+        top_k: int = 20,
+        stop_sequences: Optional[Set[int]] = None,
+        ablate_cp: bool = False,
+        ablate_mimo: bool = False
     ) -> torch.Tensor:
-        """
-        Autoregressively generate tokens.
-        
-        Args:
-            input_ids (torch.Tensor): Initial token prompt.
-            max_new_tokens (int): Maximum number of tokens to generate.
-            temperature (float): Softmax temperature scaling parameter.
-            top_k (int): Limits sampling to top k probable tokens.
-            stop_sequences (Optional[Set[int]]): Set of token IDs that stop generation.
-            
-        Returns:
-            torch.Tensor: Full generated token sequence.
-        """
+        """Autoregressively generate tokens with repetition dampening."""
         self.eval()
-        for _ in range(max_new_tokens): 
-            logits = self.forward(input_ids, loop_idx=0)
-            next_token_logits = logits[:, -1, :] / temperature
+        cur_ids = input_ids.clone()
+        for _ in range(max_new_tokens):
+            logits = self.forward(cur_ids, loop_idx=0, ablate_cp=ablate_cp, ablate_mimo=ablate_mimo)
+            next_token_logits = logits[:, -1, :] / max(temperature, 1e-4)
             
-            # Autoregressive State Saturation Fix: Repetition Penalty
-            # Penalize tokens that have already been generated in this sequence
-            for token_id in torch.unique(input_ids[0]):
+            # Repetition penalty on previously generated sequence
+            for token_id in torch.unique(cur_ids[0]):
                 if next_token_logits[0, token_id] > 0:
                     next_token_logits[0, token_id] /= 1.2
                 else:
                     next_token_logits[0, token_id] *= 1.2
-
+                    
             if top_k > 0:
                 indices_to_remove = next_token_logits < torch.topk(next_token_logits, top_k)[0][..., -1, None]
                 next_token_logits[indices_to_remove] = -float('Inf')
                 
             probs = F.softmax(next_token_logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)
-            
-            input_ids = torch.cat([input_ids, next_token], dim=-1)
+            cur_ids = torch.cat([cur_ids, next_token], dim=-1)
             
             if stop_sequences and next_token.item() in stop_sequences:
                 break
                 
-        return input_ids
+        return cur_ids
